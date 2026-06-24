@@ -34,6 +34,11 @@ const els = {
   releaseDialog: document.querySelector("#releaseDialog"),
   releaseDetails: document.querySelector("#releaseDetails"),
   confirmReleaseButton: document.querySelector("#confirmReleaseButton"),
+  fillDialog: document.querySelector("#fillDialog"),
+  fillDetails: document.querySelector("#fillDetails"),
+  fillDialogClose: document.querySelector("#fillDialogClose"),
+  fillDialogCancel: document.querySelector("#fillDialogCancel"),
+  fillDialogConfirm: document.querySelector("#fillDialogConfirm"),
   systemDialog: document.querySelector("#systemDialog"),
   systemForm: document.querySelector("#systemForm"),
   systemDialogTitle: document.querySelector("#systemDialogTitle"),
@@ -115,6 +120,11 @@ function bindEvents() {
       state.pendingReleaseAccountId = "";
     }
   });
+
+  // Fill dialog events
+  els.fillDialogClose.addEventListener("click", closeFillDialog);
+  els.fillDialogCancel.addEventListener("click", closeFillDialog);
+  els.fillDialogConfirm.addEventListener("click", confirmFill);
 
   els.openSystemDialog.addEventListener("click", () => openSystemForm());
   els.editSystemButton.addEventListener("click", () => openSystemForm(currentSystem()));
@@ -334,6 +344,10 @@ function renderAccounts() {
           : account.status === "locked"
             ? `<button class="link-button" data-unlock="${account.id}" type="button">解除占用</button>`
             : `<button class="link-button" data-lock="${account.id}" type="button">标记占用</button>`;
+      const fillBtn =
+        account.status === "idle"
+          ? `<button class="fill-button" data-fill="${account.id}" type="button">填充并跳转</button>`
+          : "";
       const editBtn =
         account.status === "idle"
           ? `<button class="card-edit-btn" data-edit-account="${account.id}" type="button" title="编辑账号">✏️</button>`
@@ -347,7 +361,7 @@ function renderAccounts() {
           </div>
           <h3>${escapeHtml(account.display_name)}</h3>
           <p class="username">${escapeHtml(account.username)}</p>
-          <div class="card-actions">${action}</div>
+          <div class="card-actions">${action}${fillBtn}</div>
         </article>
       `;
     })
@@ -383,6 +397,12 @@ function renderAccounts() {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       openAccountForm(button.dataset.editAccount);
+    });
+  });
+  els.accountGrid.querySelectorAll("[data-fill]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openFillDialog(button.dataset.fill);
     });
   });
 
@@ -466,6 +486,70 @@ async function openLoginPage() {
   } finally {
     els.openLoginButton.disabled = false;
     els.openLoginButton.textContent = "打开登录页";
+  }
+}
+
+function openFillDialog(accountId) {
+  const system = currentSystem();
+  const account = state.accounts.find((item) => item.id === accountId);
+  if (!system || !account) return;
+  if (account.status !== "idle") {
+    toast(account.status === "active" ? "该账号正在使用中" : "该账号已被负责人标记为占用", "warn");
+    return;
+  }
+  state.selectedAccountId = accountId;
+  els.fillDetails.innerHTML = `
+    <div><dt>目标系统</dt><dd>${escapeHtml(system.name)}</dd></div>
+    <div><dt>环境</dt><dd>${envLabel(system.env_tag)}</dd></div>
+    <div><dt>登录页</dt><dd>${escapeHtml(system.login_url)}</dd></div>
+    <div><dt>账号</dt><dd>${escapeHtml(account.display_name)}</dd></div>
+    <div><dt>用户名</dt><dd>${escapeHtml(account.username)}</dd></div>
+    <div><dt>密码</dt><dd>••••••••</dd></div>
+    <div><dt>浏览器模式</dt><dd>${modeLabels[state.browserMode] || state.browserMode}</dd></div>
+  `;
+  els.fillDialogConfirm.disabled = false;
+  els.fillDialogConfirm.innerHTML = `
+    <span class="btn-icon" style="margin-right: 4px;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+    </span>
+    确认填充
+  `;
+  els.fillDialog.showModal();
+}
+
+function closeFillDialog() {
+  els.fillDialog.close();
+}
+
+async function confirmFill() {
+  const system = currentSystem();
+  const account = currentAccount();
+  if (!system || !account) return;
+  els.fillDialogConfirm.disabled = true;
+  els.fillDialogConfirm.textContent = "正在填充…";
+  try {
+    const payloadData = {
+      system_id: system.id,
+      account_id: account.id,
+      browser_mode: state.browserMode,
+    };
+    if (state.browserMode === "profile") {
+      payloadData.chrome_profile_directory = state.selectedChromeProfileDirectory;
+    }
+    const payload = await api.fill(payloadData);
+    els.fillDialog.close();
+    toast(payload.fill.message || "填充任务已启动", "success");
+    await loadAccounts();
+    await loadLogs();
+  } catch (error) {
+    toast(error.message, "error");
+    els.fillDialogConfirm.disabled = false;
+    els.fillDialogConfirm.innerHTML = `
+      <span class="btn-icon" style="margin-right: 4px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+      </span>
+      确认填充
+    `;
   }
 }
 

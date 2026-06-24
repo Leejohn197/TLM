@@ -7,7 +7,7 @@ from typing import Any
 from . import repositories as repo
 from .browser_launcher import BrowserLaunchError, list_chrome_profiles, open_login_page
 from .models import ACCOUNT_STATUSES, BROWSER_MODES, ENV_TAGS
-from .playwright_adapter import FillAdapter, FillRequest
+from .playwright_adapter import FillRequest, get_adapter
 from .security import PasswordCipher
 
 URL_RE = re.compile(r"^https?://", re.IGNORECASE)
@@ -75,6 +75,9 @@ def fill(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, Any]:
     account_id = str(data.get("account_id", ""))
     browser_mode = str(data.get("browser_mode", "normal"))
     context_key = str(data.get("context_key", "default-profile")).strip() or "default-profile"
+    profile_directory = data.get("chrome_profile_directory")
+    if profile_directory is not None:
+        profile_directory = str(profile_directory)
 
     if browser_mode not in BROWSER_MODES:
         raise ServiceError("浏览器模式不合法")
@@ -97,7 +100,7 @@ def fill(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, Any]:
     repo.set_account_status(conn, account_id, "active", session_id)
 
     cipher = PasswordCipher()
-    adapter = FillAdapter()
+    adapter = get_adapter()
     result = adapter.start_fill(
         FillRequest(
             system_id=system_id,
@@ -107,6 +110,7 @@ def fill(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, Any]:
             password=cipher.decrypt(account["password_enc"]),
             browser_mode=browser_mode,
             session_id=session_id,
+            profile_directory=profile_directory,
         )
     )
     repo.log(conn, "fill", system_id, account_id, browser_mode, result.status, result.message)
