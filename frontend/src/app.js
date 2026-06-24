@@ -4,9 +4,11 @@ const state = {
   systems: [],
   accounts: [],
   logs: [],
+  chromeProfiles: [],
   selectedSystemId: "",
   selectedAccountId: "",
   browserMode: "normal",
+  selectedChromeProfileDirectory: "",
   roleFilter: "",
   search: "",
   editingSystemId: "",
@@ -26,6 +28,9 @@ const els = {
   guestCount: document.querySelector("#guestCount"),
   logList: document.querySelector("#logList"),
   clearLogsButton: document.querySelector("#clearLogsButton"),
+  openLoginButton: document.querySelector("#openLoginButton"),
+  chromeProfileField: document.querySelector("#chromeProfileField"),
+  chromeProfileSelect: document.querySelector("#chromeProfileSelect"),
   releaseDialog: document.querySelector("#releaseDialog"),
   releaseDetails: document.querySelector("#releaseDetails"),
   confirmReleaseButton: document.querySelector("#confirmReleaseButton"),
@@ -41,6 +46,7 @@ const els = {
   deleteAccountButton: document.querySelector("#deleteAccountButton"),
   editSystemButton: document.querySelector("#editSystemButton"),
   deleteSystemButton: document.querySelector("#deleteSystemButton"),
+  toggleSidebarButton: document.querySelector("#toggleSidebarButton"),
 };
 
 const statusMeta = {
@@ -49,13 +55,32 @@ const statusMeta = {
   locked: { label: "被占用", tone: "locked" },
 };
 
+const modeLabels = {
+  normal: "普通页签",
+  guest: "访客模式",
+  incognito: "无痕模式",
+  profile: "个人资料",
+};
+
 async function init() {
+  const isCollapsed = localStorage.getItem('sidebar-collapsed') === 'true';
+  if (isCollapsed) {
+    document.querySelector('.app-shell').classList.add('is-collapsed');
+  }
+
   bindEvents();
   await refreshAll();
   window.setInterval(refreshGuestSessions, 5000);
+  document.querySelectorAll('select').forEach(syncCustomSelect);
 }
 
 function bindEvents() {
+  els.toggleSidebarButton.addEventListener('click', () => {
+    const shell = document.querySelector('.app-shell');
+    const isNowCollapsed = shell.classList.toggle('is-collapsed');
+    localStorage.setItem('sidebar-collapsed', isNowCollapsed);
+  });
+
   els.systemSearch.addEventListener("input", (event) => {
     state.search = event.target.value.trim();
     renderSystems();
@@ -67,8 +92,14 @@ function bindEvents() {
       document.querySelectorAll(".segment").forEach((item) => {
         item.classList.toggle("is-active", item.dataset.mode === state.browserMode);
       });
+      renderBrowserModeControls();
       renderStatusbar();
     });
+  });
+
+  els.chromeProfileSelect.addEventListener("change", (event) => {
+    state.selectedChromeProfileDirectory = event.target.value;
+    renderStatusbar();
   });
 
   els.roleFilter.addEventListener("change", (event) => {
@@ -78,6 +109,7 @@ function bindEvents() {
 
   els.confirmReleaseButton.addEventListener("click", confirmRelease);
   els.clearLogsButton.addEventListener("click", clearLogs);
+  els.openLoginButton.addEventListener("click", openLoginPage);
   els.releaseDialog.addEventListener("close", () => {
     if (els.releaseDialog.returnValue === "cancel") {
       state.pendingReleaseAccountId = "";
@@ -112,6 +144,7 @@ function bindEvents() {
 async function refreshAll() {
   try {
     await api.health();
+    await loadChromeProfiles();
     await loadSystems();
     await refreshGuestSessions();
     await loadLogs();
@@ -122,6 +155,15 @@ async function refreshAll() {
   }
 }
 
+async function loadChromeProfiles() {
+  const payload = await api.chromeProfiles();
+  state.chromeProfiles = payload.profiles || [];
+  if (!state.selectedChromeProfileDirectory && state.chromeProfiles.length) {
+    state.selectedChromeProfileDirectory = state.chromeProfiles[0].directory;
+  }
+  renderProfileOptions();
+}
+
 async function loadSystems() {
   const payload = await api.systems();
   state.systems = payload.systems;
@@ -130,6 +172,29 @@ async function loadSystems() {
   }
   renderSystems();
   await loadAccounts();
+}
+
+function renderProfileOptions() {
+  els.chromeProfileSelect.innerHTML = state.chromeProfiles
+    .map((profile) => {
+      const label = profile.name === profile.directory
+        ? profile.name
+        : `${profile.name}（${profile.directory}）`;
+      return `<option value="${escapeHtml(profile.directory)}">${escapeHtml(label)}</option>`;
+    })
+    .join("");
+  els.chromeProfileSelect.value = state.selectedChromeProfileDirectory;
+  syncCustomSelect(els.chromeProfileSelect);
+  renderBrowserModeControls();
+}
+
+function renderBrowserModeControls() {
+  const isProfileMode = state.browserMode === "profile";
+  els.chromeProfileField.hidden = !isProfileMode;
+  const wrapper = els.chromeProfileSelect.nextElementSibling;
+  if (wrapper?.classList.contains("custom-select-wrapper")) {
+    wrapper.hidden = !isProfileMode;
+  }
 }
 
 async function loadAccounts() {
@@ -172,7 +237,8 @@ function renderSystems() {
       const active = system.id === state.selectedSystemId ? "is-active" : "";
       return `
         <button class="system-item ${active}" data-system-id="${system.id}" type="button">
-          <span>
+          <span class="system-icon">${escapeHtml(system.name.charAt(0).toUpperCase())}</span>
+          <span class="system-text">
             <strong>${escapeHtml(system.name)}</strong>
             <small>${envLabel(system.env_tag)}</small>
           </span>
@@ -184,10 +250,13 @@ function renderSystems() {
 
   els.systemList.querySelectorAll(".system-item").forEach((button) => {
     button.addEventListener("click", async () => {
+      if (state.selectedSystemId === button.dataset.systemId) return;
       state.selectedSystemId = button.dataset.systemId;
       state.selectedAccountId = "";
+      els.systemList.querySelectorAll(".system-item").forEach((btn) => {
+        btn.classList.toggle("is-active", btn.dataset.systemId === state.selectedSystemId);
+      });
       await loadAccounts();
-      renderSystems();
     });
   });
 }
@@ -203,7 +272,16 @@ function renderCurrentSystem() {
   els.systemSummary.innerHTML = `
     <div class="summary-cell">
       <span>登录页</span>
-      <strong>${escapeHtml(system.login_url)}</strong>
+      <div class="url-with-link">
+        <strong>${escapeHtml(system.login_url)}</strong>
+        <a href="${escapeHtml(system.login_url)}" target="_blank" rel="noopener noreferrer" class="external-link-btn" title="在新标签页中打开">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+        </a>
+      </div>
     </div>
     <div class="summary-cell compact">
       <span>环境</span>
@@ -226,6 +304,7 @@ function renderRoleFilter() {
     `<option value="">全部角色</option>` +
     roles.map((role) => `<option value="${escapeHtml(role)}">${escapeHtml(role)}</option>`).join("");
   els.roleFilter.value = state.roleFilter;
+  syncCustomSelect(els.roleFilter);
 }
 
 function renderAccounts() {
@@ -284,7 +363,10 @@ function renderAccounts() {
         return;
       }
       state.selectedAccountId = account.id;
-      renderAccounts();
+      els.accountGrid.querySelectorAll(".account-card").forEach((c) => {
+        c.classList.toggle("is-selected", c.dataset.accountId === state.selectedAccountId);
+      });
+      els.deleteAccountButton.style.display = currentAccount() ? "" : "none";
     });
   });
 
@@ -342,15 +424,49 @@ async function clearLogs() {
 function renderStatusbar() {
   const system = currentSystem();
   if (!system) {
+    els.openLoginButton.disabled = true;
     renderStatus("请先新增系统");
   } else {
+    const needsProfile = state.browserMode === "profile";
+    const hasProfile = Boolean(state.selectedChromeProfileDirectory);
+    els.openLoginButton.disabled = needsProfile && !hasProfile;
     const count = state.accounts.filter((item) => item.status === "idle").length;
-    renderStatus(`${system.name} · ${count} 个空闲账号`);
+    const profile = currentChromeProfile();
+    const modeText = needsProfile && profile
+      ? `${modeLabels[state.browserMode]}：${profile.name}`
+      : modeLabels[state.browserMode];
+    renderStatus(`${system.name} · ${count} 个空闲账号 · ${modeText}`);
   }
 }
 
 function renderStatus(text) {
   els.statusText.textContent = text;
+}
+
+async function openLoginPage() {
+  const system = currentSystem();
+  if (!system) return;
+  els.openLoginButton.disabled = true;
+  els.openLoginButton.textContent = "正在打开...";
+  try {
+    const payloadData = {
+      system_id: system.id,
+      browser_mode: state.browserMode,
+    };
+    if (state.browserMode === "profile") {
+      payloadData.chrome_profile_directory = state.selectedChromeProfileDirectory;
+    }
+    const payload = await api.openLogin({
+      ...payloadData,
+    });
+    toast(payload.open_login.message, "success");
+    await loadLogs();
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    els.openLoginButton.disabled = false;
+    els.openLoginButton.textContent = "打开登录页";
+  }
 }
 
 function openReleaseDialog(accountId) {
@@ -388,6 +504,7 @@ function openSystemForm(system = null) {
     els.systemForm.elements.login_url.value = system.login_url;
     els.systemForm.elements.note.value = system.note || "";
   }
+  syncCustomSelect(els.systemForm.elements.env_tag);
   els.systemDialog.showModal();
 }
 
@@ -419,7 +536,7 @@ async function saveSystem(event) {
 async function deleteCurrentSystem() {
   const system = currentSystem();
   if (!system) return;
-  const confirmed = window.confirm(`确认删除「${system.name}」？`);
+  const confirmed = await confirmAction(`确认删除系统「${system.name}」？此操作无法撤销。`);
   if (!confirmed) return;
   try {
     await api.deleteSystem(system.id);
@@ -435,7 +552,7 @@ async function deleteCurrentSystem() {
 async function deleteSelectedAccount() {
   const account = currentAccount();
   if (!account) return;
-  const confirmed = window.confirm(`确认删除账号「${account.display_name}」？`);
+  const confirmed = await confirmAction(`确认删除账号「${account.display_name}」？`);
   if (!confirmed) return;
   try {
     await api.deleteAccount(account.id);
@@ -533,6 +650,12 @@ function currentAccount() {
   return state.accounts.find((account) => account.id === state.selectedAccountId);
 }
 
+function currentChromeProfile() {
+  return state.chromeProfiles.find((profile) => {
+    return profile.directory === state.selectedChromeProfileDirectory;
+  });
+}
+
 function envLabel(env) {
   return { TEST: "测试", UAT: "UAT", PRE: "预发布" }[env] || env;
 }
@@ -541,12 +664,108 @@ function emptyState(text) {
   return `<div class="empty-state">${escapeHtml(text)}</div>`;
 }
 
+function syncCustomSelect(selectEl) {
+  selectEl.style.display = 'none';
+
+  let wrapper = selectEl.nextElementSibling;
+  if (!wrapper || !wrapper.classList.contains('custom-select-wrapper')) {
+    wrapper = document.createElement('div');
+    wrapper.className = 'custom-select-wrapper';
+    selectEl.parentNode.insertBefore(wrapper, selectEl.nextSibling);
+    
+    document.addEventListener('click', (e) => {
+      if (!wrapper.contains(e.target) && e.target !== selectEl) {
+        wrapper.classList.remove('is-open');
+      }
+    });
+  }
+
+  const options = Array.from(selectEl.options);
+  const selectedOption = options.find(o => o.selected) || options[0];
+  const selectedText = selectedOption ? selectedOption.textContent : '';
+
+  wrapper.innerHTML = `
+    <div class="custom-select-trigger" tabindex="0">${escapeHtml(selectedText)}</div>
+    <ul class="custom-select-options">
+      ${options.map((opt, index) => {
+        const isSelected = opt.selected ? 'is-selected' : '';
+        return `<li class="custom-select-option ${isSelected}" data-index="${index}">${escapeHtml(opt.textContent)}</li>`;
+      }).join('')}
+    </ul>
+  `;
+
+  const trigger = wrapper.querySelector('.custom-select-trigger');
+  const optionNodes = wrapper.querySelectorAll('.custom-select-option');
+
+  trigger.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    document.querySelectorAll('.custom-select-wrapper.is-open').forEach(w => {
+      if (w !== wrapper) w.classList.remove('is-open');
+    });
+    wrapper.classList.toggle('is-open');
+  });
+
+  trigger.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      wrapper.classList.toggle('is-open');
+    }
+  });
+
+  optionNodes.forEach(node => {
+    node.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = parseInt(node.dataset.index, 10);
+      selectEl.selectedIndex = idx;
+      wrapper.classList.remove('is-open');
+      selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+      syncCustomSelect(selectEl);
+    });
+  });
+}
+
 function toast(message, type = "info") {
   const node = document.createElement("div");
   node.className = `toast ${type}`;
   node.textContent = message;
   els.toastRegion.append(node);
   window.setTimeout(() => node.remove(), 3200);
+}
+
+function confirmAction(message) {
+  return new Promise((resolve) => {
+    const dialog = document.getElementById("confirmDialog");
+    const msgEl = document.getElementById("confirmDialogMessage");
+    const confirmBtn = document.getElementById("confirmDialogConfirm");
+    const cancelBtn = document.getElementById("confirmDialogCancel");
+
+    msgEl.textContent = message;
+
+    const cleanup = () => {
+      confirmBtn.removeEventListener("click", onConfirm);
+      cancelBtn.removeEventListener("click", onCancel);
+      dialog.removeEventListener("cancel", onCancel);
+      dialog.close();
+    };
+
+    const onConfirm = () => {
+      cleanup();
+      resolve(true);
+    };
+
+    const onCancel = (e) => {
+      e.preventDefault();
+      cleanup();
+      resolve(false);
+    };
+
+    confirmBtn.addEventListener("click", onConfirm);
+    cancelBtn.addEventListener("click", onCancel);
+    dialog.addEventListener("cancel", onCancel);
+
+    dialog.showModal();
+  });
 }
 
 function formatTime(value) {

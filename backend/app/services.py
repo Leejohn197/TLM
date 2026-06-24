@@ -5,6 +5,7 @@ import sqlite3
 from typing import Any
 
 from . import repositories as repo
+from .browser_launcher import BrowserLaunchError, list_chrome_profiles, open_login_page
 from .models import ACCOUNT_STATUSES, BROWSER_MODES, ENV_TAGS
 from .playwright_adapter import FillAdapter, FillRequest
 from .security import PasswordCipher
@@ -115,6 +116,37 @@ def fill(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, Any]:
         "message": result.message,
         "captcha_required": result.captcha_required,
     }
+
+
+def open_login(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, Any]:
+    system_id = str(data.get("system_id", ""))
+    browser_mode = str(data.get("browser_mode", "normal"))
+    profile_directory = data.get("chrome_profile_directory")
+    if profile_directory is not None:
+        profile_directory = str(profile_directory)
+    if browser_mode not in BROWSER_MODES:
+        raise ServiceError("浏览器模式不合法")
+
+    system = require_system(conn, system_id)
+    try:
+        result = open_login_page(system["login_url"], browser_mode, profile_directory)
+    except BrowserLaunchError as exc:
+        repo.log(conn, "open_login", system_id, None, browser_mode, "failed", str(exc))
+        raise ServiceError(str(exc), 500) from exc
+
+    message = f"已用{result.command_label}打开：{system['name']}"
+    repo.log(conn, "open_login", system_id, None, browser_mode, "success", message)
+    return {
+        "system_id": system_id,
+        "system_name": system["name"],
+        "login_url": result.login_url,
+        "browser_mode": result.browser_mode,
+        "message": message,
+    }
+
+
+def browser_profiles_payload() -> dict[str, Any]:
+    return {"profiles": list_chrome_profiles()}
 
 
 def account_status(conn: sqlite3.Connection, account_id: str) -> dict[str, Any]:

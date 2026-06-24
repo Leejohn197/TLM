@@ -33,6 +33,8 @@ export const api = {
     }),
   deleteAccount: (accountId) => request(`/api/accounts/${accountId}`, { method: "DELETE" }),
   fill: (data) => request("/api/fill", { method: "POST", body: JSON.stringify(data) }),
+  openLogin: (data) =>
+    request("/api/open-login", { method: "POST", body: JSON.stringify(data) }),
   release: (accountId) =>
     request(`/api/accounts/${accountId}/release`, { method: "POST", body: "{}" }),
   lock: (accountId, locked) =>
@@ -41,6 +43,7 @@ export const api = {
       body: JSON.stringify({ locked }),
     }),
   guestSessions: () => request("/api/browser/guest-sessions"),
+  chromeProfiles: () => request("/api/browser/profiles"),
   logs: () => request("/api/logs"),
   clearLogs: () => request("/api/logs", { method: "DELETE" }),
 };

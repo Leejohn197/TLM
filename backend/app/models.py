@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-BROWSER_MODES = {"normal", "guest", "incognito"}
+BROWSER_MODES = {"normal", "guest", "incognito", "profile"}
 ACCOUNT_STATUSES = {"idle", "active", "locked"}
 ENV_TAGS = {"TEST", "UAT", "PRE"}
 
@@ -14,4 +14,5 @@ BROWSER_MODE_LABELS = {
     "normal": "普通页签",
     "guest": "访客模式",
     "incognito": "无痕模式",
+    "profile": "个人资料",
 }

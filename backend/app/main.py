@@ -85,6 +85,9 @@ class TlmHandler(BaseHTTPRequestHandler):
             if method == "POST" and path == "/api/fill":
                 self.json_response({"fill": services.fill(conn, body)}, 202)
                 return
+            if method == "POST" and path == "/api/open-login":
+                self.json_response({"open_login": services.open_login(conn, body)}, 202)
+                return
 
             status_match = re.fullmatch(r"/api/accounts/([^/]+)/status", path)
             if method == "GET" and status_match:
@@ -113,6 +116,9 @@ class TlmHandler(BaseHTTPRequestHandler):
 
             if method == "GET" and path == "/api/browser/guest-sessions":
                 self.json_response(services.browser_payload(conn))
+                return
+            if method == "GET" and path == "/api/browser/profiles":
+                self.json_response(services.browser_profiles_payload())
                 return
 
             if method == "GET" and path == "/api/logs":
