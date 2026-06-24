@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1280" />
+    <title>TLM 测试登录管理工具</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script type="module" src="/src/app.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="系统导航">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">T</div>
+          <div>
+            <strong>TLM</strong>
+            <span>测试登录管理</span>
+          </div>
+        </div>
+
+        <div class="sidebar-toolbar">
+          <label class="search-field">
+            <span>搜索系统</span>
+            <input id="systemSearch" type="search" placeholder="招标 / OA / ERP" />
+          </label>
+          <button class="secondary-button" id="openSystemDialog" type="button">新增系统</button>
+        </div>
+
+        <nav class="system-list" id="systemList"></nav>
+      </aside>
+
+      <main class="workspace">
+        <section class="topbar" aria-label="当前系统">
+          <div>
+            <p class="section-label">当前系统</p>
+            <h1 id="systemTitle">正在加载...</h1>
+          </div>
+          <div class="topbar-actions">
+            <button class="secondary-button" id="editSystemButton" type="button">编辑系统</button>
+            <button class="danger-button" id="deleteSystemButton" type="button">删除</button>
+          </div>
+        </section>
+
+        <section class="system-summary" id="systemSummary"></section>
+
+        <section class="command-row" aria-label="账号操作">
+          <div class="browser-mode" role="radiogroup" aria-label="浏览器模式">
+            <button class="segment is-active" data-mode="normal" type="button">普通页签</button>
+            <button class="segment" data-mode="guest" type="button">访客模式</button>
+            <button class="segment" data-mode="incognito" type="button">无痕模式</button>
+          </div>
+          <div class="command-actions">
+            <label class="filter-field">
+              <span>角色筛选</span>
+              <select id="roleFilter">
+                <option value="">全部角色</option>
+              </select>
+            </label>
+            <button class="secondary-button" id="openAccountDialog" type="button">新增账号</button>
+            <button class="danger-button" id="deleteAccountButton" type="button" style="display:none">删除账号</button>
+          </div>
+        </section>
+
+        <section class="accounts-region" aria-label="账号列表">
+          <div class="region-heading">
+            <div>
+              <p class="section-label">账号卡片</p>
+              <h2>管理测试账号</h2>
+            </div>
+            <span class="hint" id="accountHint"></span>
+          </div>
+          <div class="account-grid" id="accountGrid"></div>
+        </section>
+
+        <section class="activity-region" aria-label="操作日志">
+          <div class="region-heading">
+            <div>
+              <p class="section-label">最近操作</p>
+              <h2>本机日志</h2>
+            </div>
+            <button class="secondary-button" id="clearLogsButton" type="button">清除日志</button>
+          </div>
+          <div class="log-list" id="logList"></div>
+        </section>
+      </main>
+    </div>
+
+    <footer class="statusbar">
+      <div id="statusText">本地服务连接中...</div>
+      <div class="statusbar-right">
+        <span id="guestCount">当前访客会话：0 个</span>
+      </div>
+    </footer>
+
+    <dialog class="dialog" id="releaseDialog">
+      <form method="dialog" class="dialog-panel">
+        <div class="dialog-header">
+          <div>
+            <p class="section-label">释放账号</p>
+            <h2>确认要释放该账号吗？</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="关闭" type="submit">×</button>
+        </div>
+        <dl class="confirm-list" id="releaseDetails"></dl>
+        <p class="release-warning">释放后该账号会恢复为空闲状态，其他人或其他会话可以重新选择它。</p>
+        <div class="dialog-actions">
+          <button class="secondary-button" value="cancel" type="submit">取消释放</button>
+          <button class="danger-button" id="confirmReleaseButton" value="default" type="button">确认释放</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="dialog" id="systemDialog">
+      <form class="dialog-panel" id="systemForm">
+        <div class="dialog-header">
+          <div>
+            <p class="section-label">系统维护</p>
+            <h2 id="systemDialogTitle">新增系统</h2>
+          </div>
+          <button class="icon-button" value="cancel" formmethod="dialog" formnovalidate type="submit" aria-label="关闭">×</button>
+        </div>
+        <div class="form-grid">
+          <label>
+            <span>系统名称</span>
+            <input name="name" required />
+          </label>
+          <label>
+            <span>环境</span>
+            <select name="env_tag" required>
+              <option value="TEST">测试</option>
+              <option value="UAT">UAT</option>
+              <option value="PRE">预发布</option>
+            </select>
+          </label>
+          <label class="span-2">
+            <span>登录页 URL</span>
+            <input name="login_url" required placeholder="https://example.test/login" />
+          </label>
+          <label class="span-2">
+            <span>备注</span>
+            <textarea name="note" rows="3"></textarea>
+          </label>
+        </div>
+        <div class="dialog-actions">
+          <button class="secondary-button" value="cancel" formmethod="dialog" formnovalidate type="submit">取消</button>
+          <button class="primary-button" type="submit">保存系统</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="dialog" id="accountDialog">
+      <form class="dialog-panel" id="accountForm">
+        <div class="dialog-header">
+          <div>
+            <p class="section-label">账号维护</p>
+            <h2 id="accountDialogTitle">新增账号</h2>
+          </div>
+          <button class="icon-button" value="cancel" formmethod="dialog" formnovalidate type="submit" aria-label="关闭">×</button>
+        </div>
+        <div class="form-grid">
+          <label>
+            <span>角色名称</span>
+            <input name="role_label" required placeholder="管理员" />
+          </label>
+          <label>
+            <span>显示名称</span>
+            <input name="display_name" required placeholder="张测试" />
+          </label>
+          <label>
+            <span>用户名</span>
+            <input name="username" required autocomplete="off" />
+          </label>
+          <label class="password-label">
+            <span>密码</span>
+            <div class="password-wrapper">
+              <input name="password" required type="password" autocomplete="new-password" />
+              <button type="button" class="password-toggle" aria-label="切换密码可见性" tabindex="-1">
+                <svg class="eye-icon eye-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+                <svg class="eye-icon eye-closed" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+                  <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              </button>
+            </div>
+          </label>
+        </div>
+        <div class="dialog-actions">
+          <button class="secondary-button" value="cancel" formmethod="dialog" formnovalidate type="submit">取消</button>
+          <button class="primary-button" type="submit">保存账号</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+  </body>
+</html>
