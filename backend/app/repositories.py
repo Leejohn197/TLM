@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 
 from .database import utc_now
+from .models import ACTIVE_BROWSER_SESSION_STATUSES
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -161,19 +162,40 @@ def create_browser_session(
     conn.execute(
         """
         INSERT INTO browser_sessions (
-            id, system_id, account_id, browser_mode, context_key, status, created_at, released_at
+            id, system_id, account_id, browser_mode, context_key, status, message, created_at, released_at
         )
-        VALUES (?, ?, ?, ?, ?, 'active', ?, NULL)
+        VALUES (?, ?, ?, ?, ?, 'starting', ?, ?, NULL)
         """,
-        (session_id, system_id, account_id, browser_mode, context_key, utc_now()),
+        (session_id, system_id, account_id, browser_mode, context_key, "正在启动浏览器", utc_now()),
     )
     return session_id
 
 
-def release_browser_session(conn: sqlite3.Connection, session_id: str) -> None:
+def get_browser_session(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] | None:
+    return row_to_dict(conn.execute("SELECT * FROM browser_sessions WHERE id = ?", (session_id,)).fetchone())
+
+
+def update_browser_session_status(
+    conn: sqlite3.Connection,
+    session_id: str,
+    status: str,
+    message: str,
+) -> None:
+    released_at = utc_now() if status in {"failed", "released"} else None
     conn.execute(
-        "UPDATE browser_sessions SET status = 'released', released_at = ? WHERE id = ?",
-        (utc_now(), session_id),
+        """
+        UPDATE browser_sessions
+        SET status = ?, message = ?, released_at = COALESCE(?, released_at)
+        WHERE id = ?
+        """,
+        (status, message, released_at, session_id),
+    )
+
+
+def release_browser_session(conn: sqlite3.Connection, session_id: str, message: str = "账号已释放") -> None:
+    conn.execute(
+        "UPDATE browser_sessions SET status = 'released', message = ?, released_at = ? WHERE id = ?",
+        (message, utc_now(), session_id),
     )
 
 
@@ -182,21 +204,24 @@ def active_session_for_context(
     system_id: str,
     context_key: str,
 ) -> dict[str, Any] | None:
+    placeholders = ", ".join("?" for _ in ACTIVE_BROWSER_SESSION_STATUSES)
     return row_to_dict(
         conn.execute(
-            """
+            f"""
             SELECT * FROM browser_sessions
-            WHERE system_id = ? AND context_key = ? AND status = 'active'
+            WHERE system_id = ? AND context_key = ? AND status IN ({placeholders})
             LIMIT 1
             """,
-            (system_id, context_key),
+            (system_id, context_key, *ACTIVE_BROWSER_SESSION_STATUSES),
         ).fetchone()
     )
 
 
 def active_guest_session_count(conn: sqlite3.Connection) -> int:
+    placeholders = ", ".join("?" for _ in ACTIVE_BROWSER_SESSION_STATUSES)
     row = conn.execute(
-        "SELECT COUNT(*) FROM browser_sessions WHERE browser_mode = 'guest' AND status = 'active'"
+        f"SELECT COUNT(*) FROM browser_sessions WHERE browser_mode = 'guest' AND status IN ({placeholders})",
+        tuple(ACTIVE_BROWSER_SESSION_STATUSES),
     ).fetchone()
     return int(row[0])
 

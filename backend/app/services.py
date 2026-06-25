@@ -6,7 +6,7 @@ from typing import Any
 
 from . import repositories as repo
 from .browser_launcher import BrowserLaunchError, list_chrome_profiles, open_login_page
-from .models import ACCOUNT_STATUSES, BROWSER_MODES, ENV_TAGS
+from .models import ACCOUNT_STATUSES, BROWSER_MODES, BROWSER_SESSION_STATUSES, ENV_TAGS
 from .playwright_adapter import FillRequest, get_adapter
 from .security import PasswordCipher
 
@@ -122,6 +122,26 @@ def fill(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def session_status(conn: sqlite3.Connection, session_id: str) -> dict[str, Any]:
+    session = repo.get_browser_session(conn, session_id)
+    if not session:
+        raise ServiceError("会话不存在", 404)
+    if session["status"] not in BROWSER_SESSION_STATUSES and session["status"] != "active":
+        raise ServiceError("会话状态异常", 500)
+    account = repo.get_account(conn, session["account_id"])
+    return {
+        "id": session["id"],
+        "system_id": session["system_id"],
+        "account_id": session["account_id"],
+        "browser_mode": session["browser_mode"],
+        "status": session["status"],
+        "message": session.get("message") or "",
+        "created_at": session["created_at"],
+        "released_at": session["released_at"],
+        "account_status": account["status"] if account else "idle",
+    }
+
+
 def open_login(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, Any]:
     system_id = str(data.get("system_id", ""))
     browser_mode = str(data.get("browser_mode", "normal"))
@@ -168,9 +188,11 @@ def release_account(conn: sqlite3.Connection, account_id: str) -> dict[str, Any]
     if account["status"] != "active":
         raise ServiceError("只有使用中的账号可以释放")
     if account.get("session_id"):
-        repo.release_browser_session(conn, account["session_id"])
+        repo.release_browser_session(conn, account["session_id"], "用户手动释放账号")
     repo.set_account_status(conn, account_id, "idle", None)
     repo.log(conn, "release_account", account["system_id"], account_id, None, "success", "账号已释放")
+    if account.get("session_id"):
+        get_adapter().close_session(account["session_id"])
     return account_status(conn, account_id)
 
 

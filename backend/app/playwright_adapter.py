@@ -4,7 +4,6 @@ import logging
 import platform
 import re
 import shutil
-import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -85,8 +84,8 @@ def _chrome_user_data_dir() -> Path:
 class FillAdapter:
     """Manages Playwright + real Chrome browser sessions for auto-filling login forms.
 
-    Uses the user's installed Chrome via channel='chrome', NOT Playwright's
-    bundled Chromium binary.
+    Uses the user's installed Chrome executable, not Playwright's bundled
+    Chromium binary.
     """
 
     def __init__(self) -> None:
@@ -119,12 +118,18 @@ class FillAdapter:
         pw = None
         browser = None
         try:
+            self._mark_session_status(request.session_id, "filling", "正在打开 Chrome 并定位登录页")
             pw = sync_playwright().start()
             browser, page = self._launch_and_navigate(pw, request)
 
             if browser is None or page is None:
                 # Fallback occurred, Chrome opened via subprocess
                 logger.warning("Session %s: 已通过原生方式打开浏览器，无法自动填充密码", request.session_id)
+                self._mark_session_status(
+                    request.session_id,
+                    "fallback",
+                    "已回退为原生 Chrome 打开页面，请手动登录",
+                )
                 try:
                     pw.stop()
                 except Exception:
@@ -187,10 +192,12 @@ class FillAdapter:
             else:
                 msg = "未能定位到输入框，请手动填写"
 
+            self._mark_session_status(request.session_id, "ready", msg)
             logger.info("Session %s: %s", request.session_id, msg)
 
-        except Exception:
+        except Exception as exc:
             logger.exception("Session %s: fill worker failed", request.session_id)
+            self._fail_session(request, f"填充失败：{exc}")
             # Cleanup on failure
             try:
                 if browser is not None:
@@ -212,7 +219,8 @@ class FillAdapter:
 
         Returns (browser, page).
         """
-        logger.info("Launching browser using channel='chrome'")
+        chrome_executable = _chrome_executable()
+        logger.info("Launching browser using Chrome executable: %s", chrome_executable)
 
         # Build extra Chrome args based on browser mode
         extra_args: list[str] = [
@@ -235,7 +243,7 @@ class FillAdapter:
             try:
                 context = pw.chromium.launch_persistent_context(
                     user_data_dir,
-                    channel="chrome",
+                    executable_path=chrome_executable,
                     headless=False,
                     no_viewport=True,
                     args=extra_args,
@@ -248,22 +256,29 @@ class FillAdapter:
             except Exception as e:
                 logger.warning("launch_persistent_context failed: %s", e)
                 logger.info("Falling back to subprocess launch for profile mode.")
-                import subprocess
-                from .browser_launcher import _macos_command
-                cmd = _macos_command(request.login_url, request.browser_mode, request.profile_directory)
-                subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                from .browser_launcher import open_login_page
+
+                open_login_page(request.login_url, request.browser_mode, request.profile_directory)
                 return None, None
         else:
-            browser = pw.chromium.launch(
-                channel="chrome",
-                headless=False,
-                args=extra_args,
-                ignore_default_args=["--enable-automation"],
-            )
-            context = browser.new_context(no_viewport=True)
-            page = context.new_page()
-            page.goto(request.login_url, wait_until="domcontentloaded", timeout=30_000)
-            return browser, page
+            try:
+                browser = pw.chromium.launch(
+                    executable_path=chrome_executable,
+                    headless=False,
+                    args=extra_args,
+                    ignore_default_args=["--enable-automation"],
+                )
+                context = browser.new_context(no_viewport=True)
+                page = context.new_page()
+                page.goto(request.login_url, wait_until="domcontentloaded", timeout=30_000)
+                return browser, page
+            except Exception as e:
+                logger.warning("Chrome launch through Playwright failed: %s", e)
+                logger.info("Falling back to native Chrome launch.")
+                from .browser_launcher import open_login_page
+
+                open_login_page(request.login_url, request.browser_mode, request.profile_directory)
+                return None, None
 
     # ------------------------------------------------------------------
     # Field-filling strategies (SPA-aware with proper waits)
@@ -395,11 +410,60 @@ class FillAdapter:
         session = self._active_sessions.pop(session_id, None)
         if session is None:
             return
+        self._release_session(session_id, "浏览器页面已关闭，账号自动释放")
         try:
             session["pw"].stop()
         except Exception:
             pass
         logger.info("Session %s: 用户关闭页面，会话已清理", session_id)
+
+    @staticmethod
+    def _mark_session_status(session_id: str, status: str, message: str) -> None:
+        try:
+            from .database import connect
+            from . import repositories as repo
+
+            with connect() as conn:
+                repo.update_browser_session_status(conn, session_id, status, message)
+        except Exception:
+            logger.exception("Session %s: failed to persist status '%s'", session_id, status)
+
+    @staticmethod
+    def _fail_session(request: FillRequest, message: str) -> None:
+        try:
+            from .database import connect
+            from . import repositories as repo
+
+            with connect() as conn:
+                repo.update_browser_session_status(conn, request.session_id, "failed", message)
+                repo.set_account_status(conn, request.account_id, "idle", None)
+                repo.log(conn, "fill", request.system_id, request.account_id, request.browser_mode, "failed", message)
+        except Exception:
+            logger.exception("Session %s: failed to persist failure state", request.session_id)
+
+    @staticmethod
+    def _release_session(session_id: str, message: str) -> None:
+        try:
+            from .database import connect
+            from . import repositories as repo
+
+            with connect() as conn:
+                session = repo.get_browser_session(conn, session_id)
+                if not session or session["status"] in {"failed", "released"}:
+                    return
+                repo.release_browser_session(conn, session_id, message)
+                repo.set_account_status(conn, session["account_id"], "idle", None)
+                repo.log(
+                    conn,
+                    "release_account",
+                    session["system_id"],
+                    session["account_id"],
+                    session["browser_mode"],
+                    "success",
+                    message,
+                )
+        except Exception:
+            logger.exception("Session %s: failed to persist release state", session_id)
 
 
 # ----------------------------------------------------------------------

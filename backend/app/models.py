@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 BROWSER_MODES = {"normal", "guest", "incognito", "profile"}
+BROWSER_SESSION_STATUSES = {"starting", "filling", "ready", "fallback", "failed", "released"}
+ACTIVE_BROWSER_SESSION_STATUSES = {"active", "starting", "filling", "ready", "fallback"}
 ACCOUNT_STATUSES = {"idle", "active", "locked"}
 ENV_TAGS = {"TEST", "UAT", "PRE"}
 

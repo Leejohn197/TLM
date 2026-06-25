@@ -63,6 +63,7 @@ def init_db() -> None:
                 browser_mode TEXT NOT NULL,
                 context_key TEXT NOT NULL,
                 status TEXT NOT NULL,
+                message TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 released_at TEXT
             );
@@ -79,9 +80,18 @@ def init_db() -> None:
             );
             """
         )
+        ensure_schema(conn)
         count = conn.execute("SELECT COUNT(*) FROM systems").fetchone()[0]
         if count == 0:
             seed(conn)
+
+
+def ensure_schema(conn: sqlite3.Connection) -> None:
+    browser_session_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(browser_sessions)").fetchall()
+    }
+    if "message" not in browser_session_columns:
+        conn.execute("ALTER TABLE browser_sessions ADD COLUMN message TEXT NOT NULL DEFAULT ''")
 
 
 def seed(conn: sqlite3.Connection) -> None:

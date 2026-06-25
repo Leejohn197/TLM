@@ -67,6 +67,10 @@ const modeLabels = {
   profile: "个人资料",
 };
 
+const fillTerminalStatuses = new Set(["failed", "released"]);
+const fillProcessDoneStatuses = new Set(["ready", "fallback"]);
+const fillPolls = new Map();
+
 async function init() {
   const isCollapsed = localStorage.getItem('sidebar-collapsed') === 'true';
   if (isCollapsed) {
@@ -539,6 +543,9 @@ async function confirmFill() {
     const payload = await api.fill(payloadData);
     els.fillDialog.close();
     toast(payload.fill.message || "填充任务已启动", "success");
+    if (payload.fill.session_id) {
+      pollFillSession(payload.fill.session_id);
+    }
     await loadAccounts();
     await loadLogs();
   } catch (error) {
@@ -551,6 +558,51 @@ async function confirmFill() {
       确认填充
     `;
   }
+}
+
+function pollFillSession(sessionId, attempt = 0, hasNotifiedProcessDone = false) {
+  if (fillPolls.has(sessionId)) {
+    window.clearTimeout(fillPolls.get(sessionId));
+  }
+  const timer = window.setTimeout(async () => {
+    try {
+      const payload = await api.session(sessionId);
+      const session = payload.session;
+      if (fillTerminalStatuses.has(session.status)) {
+        fillPolls.delete(sessionId);
+        if (session.message) {
+          const tone = session.status === "failed" ? "error" : "success";
+          toast(session.message, tone);
+        }
+        await loadAccounts();
+        await refreshGuestSessions();
+        await loadLogs();
+        return;
+      }
+      let notifiedProcessDone = hasNotifiedProcessDone;
+      if (!notifiedProcessDone && fillProcessDoneStatuses.has(session.status)) {
+        notifiedProcessDone = true;
+        if (session.message) {
+          toast(session.message, session.status === "fallback" ? "warn" : "success");
+        }
+        await loadAccounts();
+        await refreshGuestSessions();
+        await loadLogs();
+      }
+      if (attempt >= 720) {
+        fillPolls.delete(sessionId);
+        toast("会话仍在使用中，请需要时手动刷新查看账号状态", "warn");
+        await loadAccounts();
+        return;
+      }
+      pollFillSession(sessionId, attempt + 1, notifiedProcessDone);
+    } catch (error) {
+      fillPolls.delete(sessionId);
+      toast(error.message, "error");
+      await loadAccounts();
+    }
+  }, attempt === 0 ? 800 : hasNotifiedProcessDone ? 5000 : 1500);
+  fillPolls.set(sessionId, timer);
 }
 
 function openReleaseDialog(accountId) {

@@ -33,6 +33,7 @@ export const api = {
     }),
   deleteAccount: (accountId) => request(`/api/accounts/${accountId}`, { method: "DELETE" }),
   fill: (data) => request("/api/fill", { method: "POST", body: JSON.stringify(data) }),
+  session: (sessionId) => request(`/api/sessions/${sessionId}`),
   openLogin: (data) =>
     request("/api/open-login", { method: "POST", body: JSON.stringify(data) }),
   release: (accountId) =>
